@@ -63,7 +63,7 @@ plot(wdpa)
 Current (2015) areas classified as urban under Chen et al., 2022
 Chen, G., Li, X., & Liu, X. (2022). Global land projection based on plant functional types with a 1-km resolution under socio-climatic scenarios. Scientific Data, 9(1), 125. https://doi.org/10.1038/s41597-022-01208-6
 ```{r}
-chen <- raster("data/global_PFT_2015.tif") 
+chen <- rast("data/global_PFT_2015.tif") 
 
 # transform italy to crop bc it's faster than re projecting the whole global raster
 italy_trans <- italy %>% 
@@ -71,15 +71,15 @@ italy_trans <- italy %>%
   vect() # vect is more agreeable to rasts
 
 # crop and mask chen to italy then project back to our crs
-chen_crop <- chen %>% 
+chen_cropped <- chen %>% 
   crop(italy_trans) %>% 
   mask(italy_trans) %>% 
   terra::project(y = crs(italy))
 
 # isolate just urban
-urban <- chen_crop
-urban[urban != 5] <- 0 # if value isn't 5, make 0
-urban[urban == 5] <- 1 # if value is 5, make 1
+urban <- chen_cropped
+urban[urban != 19] <- 0 # if value isn't 19, make 0
+urban[urban == 19] <- 1 # if value is 19, make 1
 
 plot(urban, col = c("grey90", "plum"))
 ```
@@ -127,4 +127,53 @@ kable(wdpa_overlap) %>%
   kable_styling(bootstrap_options = "striped") %>% 
   scroll_box(height = "400px")
 ```
+
+
+### UNESCO + Urban
+
+```{r}
+plot(urban, col = c("grey90", "plum"))
+plot(unesco_vect, col = "blue", add = TRUE)
+```
+
+```{r}
+urban_overlap <- terra::extract( 
+  # extract what's under the points in the raster
+  x = urban, 
+  y = unesco_vect) %>% 
+  
+  rename(urban_overlap = 2) %>% 
+  # rename second column to 'urban_overlap'
+  
+  mutate(urban_overlap = as.logical(urban_overlap)) %>% 
+  # 'extract' outputs the values of the raster (or a summary thereof),
+  # this changes it to TRUE/FALSE instead
+  
+  right_join(unesco, by = "ID") %>% 
+  # the df from extract only contains ID numbers and raster values,
+  # this joins the dataframe back up with the site names by linking the ID
+  # numbers in the two tables
+  
+  dplyr::select(!c(geometry, ID)) %>% 
+  # get rid of the columns we don't care about
+  
+  relocate(name_en, .before = urban_overlap)
+  # move the columns around in the way we want them
+
+kable(urban_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+## Combine
+
+```{r}
+overlaps <- wdpa_overlap %>% 
+  left_join(urban_overlap, by = "name_en") 
+
+kable(overlaps) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
 
