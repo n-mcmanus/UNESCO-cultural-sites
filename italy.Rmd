@@ -1,0 +1,130 @@
+---
+title: "UNESCO_WDPA"
+author: "Nick McManus"
+date: "7/22/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)  # polygons
+library(raster) #raster package
+library(terra)  # newer/faster/better raster package
+library(rnaturalearth)  #administrative boundaries data
+library(exactextractr)  # extracting what's underneath polys, points
+library(kableExtra)
+library(tidyverse)
+```
+
+## Read in Data
+
+As an example area, let's looking at Italy
+
+```{r}
+# get italy from rnaturalearth data
+italy <- ne_countries(
+  scale = "medium",
+  country = "Italy",
+  returnclass = "sf") %>% 
+  dplyr::select(sovereignt)
+
+# plot
+ggplot() +
+  geom_sf(data = italy)
+```
+
+```{r}
+# define crs so it's the same across everything
+my_crs <- st_crs(italy)
+```
+
+
+## WDPA protected areas
+UNEP-WCMC and IUCN (2021), Protected Planet: The World Database on Protected Areas (WDPA) [On-line], Cambridge, UK: UNEP-WCMC and IUCN. Available at: www.protectedplanet.net
+```{r}
+# read in raster with terra::rast
+wdpa_global <- rast("data/wdpa_raster.tif") 
+
+# transform italy to crop bc it's faster than re projecting the whole global raster
+italy_trans <- italy %>% 
+  st_transform(crs = crs(wdpa_global)) %>% 
+  vect() # vect is more agreeable to rasts
+
+# crop and mask chen to italy then project back to our crs
+wdpa <- wdpa_global %>% 
+  crop(italy_trans) %>% 
+  mask(italy_trans) %>% 
+  terra::project(y = crs(italy))
+
+plot(wdpa)
+```
+ 
+## Urban areas
+Current (2015) areas classified as urban under Chen et al., 2022
+Chen, G., Li, X., & Liu, X. (2022). Global land projection based on plant functional types with a 1-km resolution under socio-climatic scenarios. Scientific Data, 9(1), 125. https://doi.org/10.1038/s41597-022-01208-6
+```{r}
+chen <- raster("data/global_PFT_2015.tif") 
+
+# transform italy to crop bc it's faster than re projecting the whole global raster
+italy_trans <- italy %>% 
+  st_transform(crs = crs(chen)) %>% 
+  vect() # vect is more agreeable to rasts
+
+# crop and mask chen to italy then project back to our crs
+chen_crop <- chen %>% 
+  crop(italy_trans) %>% 
+  mask(italy_trans) %>% 
+  terra::project(y = crs(italy))
+
+# isolate just urban
+urban <- chen_crop
+urban[urban != 5] <- 0 # if value isn't 5, make 0
+urban[urban == 5] <- 1 # if value is 5, make 1
+
+plot(urban, col = c("grey90", "plum"))
+```
+
+
+## UNESCO Cultual Sites
+
+```{r}
+unesco <- read_csv("data/whc-cultural-sites-2021.csv") %>% 
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = st_crs("epsg:4326")) %>% 
+  filter(states_name_en == "Italy") %>%
+  st_transform(crs = my_crs) %>% 
+  dplyr::select(name_en) %>% 
+  mutate(ID = row_number()) # define id for joining later
+
+ggplot() + 
+  geom_sf(data = italy) + 
+  geom_sf(data = unesco, 
+          color = "blue") 
+```
+
+## Define overlaps
+### UNESCO + WDPA
+```{r}
+# vects play better with rasts (both are terra)
+unesco_vect <- vect(unesco)
+
+plot(wdpa)
+plot(unesco_vect, col = "blue", add = TRUE)
+```
+
+```{r}
+# use extract to extract what's underneath points
+wdpa_overlap <- terra::extract(
+  x = wdpa,
+  y = unesco_vect) %>% 
+  rename(wdpa_overlap = 2) %>% 
+  mutate(wdpa_overlap = as.logical(wdpa_overlap)) %>% # change to true/false 
+  right_join(unesco, by = "ID") %>%  # join back with unesco data
+  dplyr::select(!c(geometry, ID)) %>% # clean df
+  relocate(name_en, .before = wdpa_overlap)
+
+kable(wdpa_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
