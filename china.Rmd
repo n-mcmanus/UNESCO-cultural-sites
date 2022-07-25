@@ -58,7 +58,30 @@ wdpa <- wdpa_global %>%
 
 plot(wdpa)
 ```
- 
+## Urban areas
+Current (2015) areas classified as urban under Chen et al., 2022
+Chen, G., Li, X., & Liu, X. (2022). Global land projection based on plant functional types with a 1-km resolution under socio-climatic scenarios. Scientific Data, 9(1), 125. https://doi.org/10.1038/s41597-022-01208-6
+```{r}
+chen <- rast("data/global_PFT_2015.tif") 
+
+# transform italy to crop bc it's faster than re projecting the whole global raster
+china_trans <- china %>% 
+  st_transform(crs = crs(chen)) %>% 
+  vect() # vect is more agreeable to rasts
+
+# crop and mask chen to italy then project back to our crs
+chen_cropped <- chen %>% 
+  crop(china_trans) %>% 
+  mask(china_trans) %>% 
+  terra::project(y = crs(china))
+
+# isolate just urban
+urban <- chen_cropped
+urban[urban != 19] <- 0 # if value isn't 19, make 0
+urban[urban == 19] <- 1 # if value is 19, make 1
+
+plot(urban, col = c("grey90", "plum"))
+```
 
 ## UNESCO Cultual Sites
 
@@ -101,6 +124,40 @@ wdpa_overlap <- terra::extract(
   relocate(name_en, .before = wdpa_overlap)
 
 kable(wdpa_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+
+
+### UNESCO + Urban
+
+```{r}
+plot(urban, col = c("grey90", "plum"))
+plot(unesco_vect, col = "blue", add = TRUE)
+```
+
+```{r}
+urban_overlap <- terra::extract(
+  x = urban,
+  y = unesco_vect) %>% 
+  rename(urban_overlap = 2) %>% 
+  mutate(urban_overlap = as.logical(urban_overlap)) %>%
+  right_join(unesco, by = "ID") %>% 
+  dplyr::select(!c(geometry, ID)) %>%
+  relocate(name_en, .before = urban_overlap)
+
+kable(urban_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+## Combine
+```{r}
+overlaps <- wdpa_overlap %>% 
+  left_join(urban_overlap, by = "name_en") 
+
+kable(overlaps) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
   scroll_box(height = "400px")
 ```
