@@ -1,0 +1,156 @@
+---
+title: "global map"
+author: "Nick McManus"
+date: '2022-08-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)  # polygons
+library(raster) #raster package
+library(terra)  # newer/faster/better raster package
+library(rnaturalearth)  #administrative boundaries data
+library(exactextractr)  # extracting what's underneath polys, points
+library(kableExtra)
+library(tidyverse)
+```
+
+
+## Read in data
+
+```{r}
+# get italy from rnaturalearth data
+world <- ne_countries(
+  scale = "medium",
+  returnclass = "sf"
+)
+
+# plot
+ggplot() +
+  geom_sf(data = world)
+```
+
+
+
+```{r}
+# read in 5km resolution WDPA layer
+wdpa <- rast("data/wdpa_5km_raster.tif")
+
+# set desired crs to match wdpa layer
+my_crs <- st_crs(wdpa)
+
+
+
+
+# read in 5km resolution urban Chen data
+urban <- rast("data/chen_urban_5km.tif") %>% 
+  project(y = wdpa) # make urban and wdpa same crs
+
+
+
+
+# read in cultural sites
+unesco <- read_csv("data/whc-cultural-sites-2021.csv") %>% 
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = st_crs("epsg:4326")) %>% 
+  st_transform(crs = my_crs) %>% 
+  dplyr::select(name_en, area_hectares, states_name_en) %>% 
+  mutate(ID = row_number()) # define id for joining later
+
+
+plot(wdpa)
+plot(urban, add = TRUE)
+plot(unesco, col = "blue", add = TRUE)
+
+```
+
+
+## Define overlaps
+### UNESCO + WDPA
+```{r}
+# vects play better with rasts (both are terra)
+unesco_vect <- vect(unesco)
+
+plot(wdpa)
+plot(unesco_vect, col = "blue", add = TRUE)
+```
+
+```{r}
+# use extract() to extract what's underneath points
+wdpa_overlap <- terra::extract(
+  # extract what's under the points in the raster
+  x = wdpa,
+  y = unesco_vect) %>% 
+  
+  rename(wdpa_overlap = 2) %>%  
+  # rename second column to 'urban_overlap'
+  
+  mutate(wdpa_overlap = as.logical(wdpa_overlap)) %>% 
+  # extract() outputs the values of the raster (or a summary thereof)
+  # change to true/false 
+  
+  right_join(unesco, by = "ID") %>% 
+  # the df from extract only contains ID numbers and raster values,
+  # this joins the dataframe back up with the site names by linking the ID
+  # numbers in the two tables
+  
+  dplyr::select(!c(geometry, ID)) %>% 
+  # remove columns we don't care about
+  
+  relocate(name_en, .before = wdpa_overlap) %>%
+  # move columns into desired order
+  
+  rename(country = states_name_en)
+  # change column name
+
+kable(wdpa_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+
+### UNESCO + Urban
+```{r}
+plot(urban)
+plot(unesco_vect, col = "blue", add = TRUE)
+```
+
+```{r}
+urban_overlap <- terra::extract(x = urban, y = unesco_vect) %>% 
+  rename(urban_overlap = 2) %>% 
+  mutate(urban_overlap = as.logical(urban_overlap)) %>% 
+  right_join(unesco, by = "ID") %>% 
+  dplyr::select(!c(geometry, ID)) %>% 
+  relocate(name_en, .before = urban_overlap) %>% 
+  rename(country = states_name_en)
+
+kable(urban_overlap) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+## Combine
+
+```{r}
+overlaps <- wdpa_overlap %>% 
+  left_join(urban_overlap, by = c("name_en", "area_hectares", "country")) %>% 
+  # could also probably do `by=NULL` for same result (easier if more matching variables)
+  
+  relocate(urban_overlap, .before = area_hectares)
+
+kable(overlaps) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+## Filter for sites of interest
+
+Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA *and* are over 100ha in size
+
+```{r}
+overlaps_select <- overlaps %>% 
+  filter()
+```
+
+
