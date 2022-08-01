@@ -125,6 +125,9 @@ urban_overlap <- terra::extract(x = urban, y = unesco_vect) %>%
   relocate(name_en, .before = urban_overlap) %>% 
   rename(country = states_name_en)
 
+# change NAs to FALSE for filtering later
+urban_overlap[is.na(urban_overlap)] <- FALSE
+
 kable(urban_overlap) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
   scroll_box(height = "400px")
@@ -133,24 +136,54 @@ kable(urban_overlap) %>%
 ## Combine
 
 ```{r}
-overlaps <- wdpa_overlap %>% 
-  left_join(urban_overlap, by = c("name_en", "area_hectares", "country")) %>% 
-  # could also probably do `by=NULL` for same result (easier if more matching variables)
-  
+wdpa_urban_overlap <- wdpa_overlap %>% 
+  full_join(urban_overlap, by = NULL) %>%
   relocate(urban_overlap, .before = area_hectares)
 
-kable(overlaps) %>% 
+# remove NA values for easier filtering later
+wdpa_urban_overlap[is.na(wdpa_urban_overlap)] <- FALSE
+
+kable(wdpa_urban_overlap) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
   scroll_box(height = "400px")
 ```
 
+
 ## Filter for sites of interest
 
-Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA *and* are over 100ha in size
+Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA *and* are at least 100ha in size
 
 ```{r}
-overlaps_select <- overlaps %>% 
-  filter()
+unesco_filtered <- wdpa_urban_overlap %>% 
+  filter(wdpa_overlap == FALSE,
+         urban_overlap == FALSE) %>% 
+  filter(area_hectares >= 100)
+
+kable(unesco_filtered) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+```
+
+
+Combine back with original data to get coordinates of filtered sites
+```{r}
+# read in raw csv
+raw <- read_csv("data/whc-cultural-sites-2021.csv")
+
+# join filtered unesco sites with raw csv to get lat/long data
+raw_unesco_joined <- left_join(unesco_filtered, raw, by = c("name_en", "area_hectares"))
+
+unesco_filtered_geom <- raw_unesco_joined %>% 
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = st_crs("epsg:4326")) %>% 
+  st_transform(crs = my_crs) %>% 
+  dplyr::select(name_en, area_hectares, wdpa_overlap, urban_overlap, country, geometry)
+
+unesco_filtered_vect <- vect(unesco_filtered_geom)
+
+
+plot(wdpa)
+plot(unesco_filtered_vect, col = "blue", add = TRUE)
 ```
 
 
