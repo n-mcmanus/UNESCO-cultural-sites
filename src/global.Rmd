@@ -14,17 +14,20 @@ library(rnaturalearth)  #administrative boundaries data
 library(exactextractr)  # extracting what's underneath polys, points
 library(kableExtra)
 library(tidyverse)
+library(here)
 ```
 
 
 ## Read in data
 
+This analysis will require data sets of protected areas from the WDPA, urban-classified land use, and sites from the UNESCO World Heritage Convention. WDPA and urban areas are currently excluded from agriculture and energy land use within the current SPARCLE workflow. Because UNESCO WHC sites are protected, these locations must also be excluded, or "locked out" from the SPARCLE process. The purpose of this script is to determine how many cultural heritage sites *do not* overlap with either a WDPA or urban area (at 5km resolution) *and* are larger than 100ha (1 km2) in area. 
+
 ### WDPA data
 
-Cite info here
+UNEP-WCMC and IUCN (2021), Protected Planet: The World Database on Protected Areas (WDPA) [On-line], Cambridge, UK: UNEP-WCMC and IUCN. Available at: www.protectedplanet.net
 ```{r}
 # read in 5km resolution WDPA layer
-wdpa <- rast("data/wdpa_5km_raster.tif")
+wdpa <- rast(here("data", "wdpa_5km_raster.tif"))
 
 # set desired crs to match wdpa layer
 my_crs <- st_crs(wdpa)
@@ -32,22 +35,24 @@ my_crs <- st_crs(wdpa)
 
 ### Urban data
 
-Cite info here
+Current (2015) areas classified as urban under Chen et al., 2022
+Chen, G., Li, X., & Liu, X. (2022). Global land projection based on plant functional types with a 1-km resolution under socio-climatic scenarios. Scientific Data, 9(1), 125. https://doi.org/10.1038/s41597-022-01208-6
 ```{r}
 # read in 5km resolution urban Chen data
-urban <- rast("data/chen_urban_5km.tif") %>% 
+urban <- rast(here("data", "chen_urban_5km.tif")) %>% 
   project(y = wdpa) # make urban and wdpa same crs
 
 ```
 
 ## UNESCO data
 
-Cite info here
+For this dataset, we will only be examining "cultural" heritage sites. The boundaries for sites classified as "natural" or "mixed" are included in the WDPA.
 
-Only looking at cultural sites for this analysis because natural and mixed have boundaries included in  WDPA layer already
+Copyright © 1992 - 2022 UNESCO/World Heritage Centre. All rights reserved.
+https://whc.unesco.org/en/syndication
 ```{r}
 # read in cultural heritage sites
-unesco <- read_csv("data/whc-sites-2021.csv") %>% 
+unesco <- read_csv(here("data", "whc-sites-2021.csv")) %>% 
   filter(category == "Cultural") %>% 
   st_as_sf(coords = c("longitude", "latitude"),
            crs = st_crs("epsg:4326")) %>% 
@@ -67,7 +72,10 @@ plot(unesco, col = "blue", add = TRUE)
 
 
 ## Define overlaps
+
 ### UNESCO + WDPA
+
+Determine where cultural heritage sites overlap with existing protected areas in the WDPA.
 ```{r}
 # vects play better with rasts (both are terra)
 unesco_vect <- vect(unesco)
@@ -109,6 +117,8 @@ kable(wdpa_overlap) %>%
 
 
 ### UNESCO + Urban
+
+Determine where cultural heritage sites overlap with existing urban areas. 
 ```{r}
 plot(urban)
 plot(unesco_vect, col = "blue", add = TRUE)
@@ -132,6 +142,7 @@ kable(urban_overlap) %>%
 
 ## Combine
 
+We are interested in sites that return FALSE for both urban and WDPA overlaps. Therefore, we must join the previous results. 
 ```{r}
 wdpa_urban_overlap <- wdpa_overlap %>% 
   left_join(urban_overlap, by = NULL) %>%
@@ -148,7 +159,7 @@ kable(wdpa_urban_overlap) %>%
 
 ## Filter for sites of interest
 
-Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA *and* are at least 100ha in size
+Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA layers *and* are at least 100ha in size
 
 ```{r}
 # filter combined data
@@ -163,14 +174,13 @@ kable(unesco_filtered) %>%
   scroll_box(height = "400px")
 ```
 
-
 Combine back with original data to get coordinates of filtered sites
 ```{r}
-# read in raw csv
-raw <- read_csv("data/whc-sites-2021.csv") %>% 
+# read in original UNESCO csv
+raw <- read_csv(here("data", "whc-sites-2021.csv")) %>% 
   filter(category == "Cultural")
 
-# join filtered unesco sites with raw csv to get lat/long data
+# join filtered sites with raw csv to assign lat/long data to each unesco site
 raw_unesco_joined <- left_join(unesco_filtered, raw, by = c("name_en", "area_hectares"))
 
 # assign CRS and keep only variables of interest
@@ -180,7 +190,7 @@ unesco_filtered_geom <- raw_unesco_joined %>%
   st_transform(crs = my_crs) %>% 
   dplyr::select(name_en, area_hectares, wdpa_overlap, urban_overlap, country, geometry)
 
-# turn into vector
+# turn into vector for plotting
 unesco_filtered_vect <- vect(unesco_filtered_geom)
 ```
 
@@ -192,15 +202,14 @@ world <- ne_countries(scale = "medium", returnclass = "sf") %>%
 
 plot(wdpa)
 plot(urban, col = "navyblue", add = TRUE)  #pretty hard to see since so small
-plot(world_trans, col = NA, lwd = 0.8, add = TRUE)
-plot(unesco_filtered_vect, col = "slateblue4", alpha = 0.8, cex =1.1, add = TRUE)
+plot(world, col = NA, lwd = 0.8, add = TRUE)
+plot(unesco_filtered_vect, col = "slateblue4", alpha = 0.8, cex =0.9, add = TRUE)
 ```
-
 
 
 ## Analysis
 
-Let's look at the size (in hectares) of the remaining cultural heritage sites
+Now we are interested in the size (in hectares) of the remaining cultural heritage sites.
 
 ```{r}
 # overall stats of remaining cultural sites
@@ -208,24 +217,28 @@ mean_size_ha <- mean(unesco_filtered$area_hectares)
 median_size_ha <- median(unesco_filtered$area_hectares)
 sd_size_ha <- sd(unesco_filtered$area_hectares)
 n <- count(unesco_filtered)
-mean_size_ha
-median_size_ha
-sd_size_ha
-n
+min_size <- min(unesco_filtered$area_hectares)
+max_size <- max(unesco_filtered$area_hectares)
 
+# how many sites were there originally?
+n_raw <- count(raw)
+```
 
+Of the `r n_raw` UNESCO cultural heritage sites, `r n` do not overlap with urban or WDPA areas and are at least 100ha large. These remaining sites range in size from `r min_size` to `r max_size`. The mean size is `r mean_size_ha`ha $\pm$ `r sd_size_ha` (mean $\pm$ std dev) with a median size of `r median_size_ha`. Sample statistics summarized by country are returned below:
+
+```{r}
 # look by country 
 unesco_filtered_stats <- unesco_filtered %>% 
   group_by(country) %>% 
   summarise(mean_area_ha = mean(area_hectares),
             sd_area_ha = sd(area_hectares),
             median_size_ha = median(area_hectares),
-            n = n())
+            n = n()) %>% 
+  relocate(n, .before = mean_area_ha)
 
+# return summary table
+kable(unesco_filtered_stats) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
 ```
-
-
-
-
-
 
