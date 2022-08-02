@@ -19,50 +19,50 @@ library(tidyverse)
 
 ## Read in data
 
-```{r}
-# get italy from rnaturalearth data
-world <- ne_countries(
-  scale = "medium",
-  returnclass = "sf"
-)
+### WDPA data
 
-# plot
-ggplot() +
-  geom_sf(data = world)
-```
-
-
-
+Cite info here
 ```{r}
 # read in 5km resolution WDPA layer
 wdpa <- rast("data/wdpa_5km_raster.tif")
 
 # set desired crs to match wdpa layer
 my_crs <- st_crs(wdpa)
+```
 
+### Urban data
 
-
-
+Cite info here
+```{r}
 # read in 5km resolution urban Chen data
 urban <- rast("data/chen_urban_5km.tif") %>% 
   project(y = wdpa) # make urban and wdpa same crs
 
+```
 
+## UNESCO data
 
+Cite info here
 
-# read in cultural sites
-unesco <- read_csv("data/whc-cultural-sites-2021.csv") %>% 
+Only looking at cultural sites for this analysis because natural and mixed have boundaries included in  WDPA layer already
+```{r}
+# read in cultural heritage sites
+unesco <- read_csv("data/whc-sites-2021.csv") %>% 
+  filter(category == "Cultural") %>% 
   st_as_sf(coords = c("longitude", "latitude"),
            crs = st_crs("epsg:4326")) %>% 
   st_transform(crs = my_crs) %>% 
   dplyr::select(name_en, area_hectares, states_name_en) %>% 
-  mutate(ID = row_number()) # define id for joining later
+  mutate(ID = row_number()) %>%  # define id for joining later
+  rename(country = states_name_en)
 
+```
 
+Plot all three together
+```{r}
 plot(wdpa)
 plot(urban, add = TRUE)
 plot(unesco, col = "blue", add = TRUE)
-
 ```
 
 
@@ -79,9 +79,9 @@ plot(unesco_vect, col = "blue", add = TRUE)
 ```{r}
 # use extract() to extract what's underneath points
 wdpa_overlap <- terra::extract(
-  # extract what's under the points in the raster
   x = wdpa,
   y = unesco_vect) %>% 
+  # extract what's under the points in the raster
   
   rename(wdpa_overlap = 2) %>%  
   # rename second column to 'urban_overlap'
@@ -98,11 +98,9 @@ wdpa_overlap <- terra::extract(
   dplyr::select(!c(geometry, ID)) %>% 
   # remove columns we don't care about
   
-  relocate(name_en, .before = wdpa_overlap) %>%
+  relocate(name_en, .before = wdpa_overlap)
   # move columns into desired order
   
-  rename(country = states_name_en)
-  # change column name
 
 kable(wdpa_overlap) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
@@ -122,8 +120,7 @@ urban_overlap <- terra::extract(x = urban, y = unesco_vect) %>%
   mutate(urban_overlap = as.logical(urban_overlap)) %>% 
   right_join(unesco, by = "ID") %>% 
   dplyr::select(!c(geometry, ID)) %>% 
-  relocate(name_en, .before = urban_overlap) %>% 
-  rename(country = states_name_en)
+  relocate(name_en, .before = urban_overlap)
 
 # change NAs to FALSE for filtering later
 urban_overlap[is.na(urban_overlap)] <- FALSE
@@ -137,7 +134,7 @@ kable(urban_overlap) %>%
 
 ```{r}
 wdpa_urban_overlap <- wdpa_overlap %>% 
-  full_join(urban_overlap, by = NULL) %>%
+  left_join(urban_overlap, by = NULL) %>%
   relocate(urban_overlap, .before = area_hectares)
 
 # remove NA values for easier filtering later
@@ -154,10 +151,12 @@ kable(wdpa_urban_overlap) %>%
 Now, we want to return only cultural heritage sites that do not overlap with either the urban or WDPA *and* are at least 100ha in size
 
 ```{r}
+# filter combined data
 unesco_filtered <- wdpa_urban_overlap %>% 
   filter(wdpa_overlap == FALSE,
          urban_overlap == FALSE) %>% 
   filter(area_hectares >= 100)
+
 
 kable(unesco_filtered) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
@@ -168,22 +167,65 @@ kable(unesco_filtered) %>%
 Combine back with original data to get coordinates of filtered sites
 ```{r}
 # read in raw csv
-raw <- read_csv("data/whc-cultural-sites-2021.csv")
+raw <- read_csv("data/whc-sites-2021.csv") %>% 
+  filter(category == "Cultural")
 
 # join filtered unesco sites with raw csv to get lat/long data
 raw_unesco_joined <- left_join(unesco_filtered, raw, by = c("name_en", "area_hectares"))
 
+# assign CRS and keep only variables of interest
 unesco_filtered_geom <- raw_unesco_joined %>% 
   st_as_sf(coords = c("longitude", "latitude"),
            crs = st_crs("epsg:4326")) %>% 
   st_transform(crs = my_crs) %>% 
   dplyr::select(name_en, area_hectares, wdpa_overlap, urban_overlap, country, geometry)
 
+# turn into vector
 unesco_filtered_vect <- vect(unesco_filtered_geom)
+```
 
+Plot the results
+```{r}
+# get country outlines from rnaturalearth
+world <- ne_countries(scale = "medium", returnclass = "sf") %>% 
+  st_transform(crs = crs(wdpa)) # make same crs as rest of data
 
 plot(wdpa)
-plot(unesco_filtered_vect, col = "blue", add = TRUE)
+plot(urban, col = "navyblue", add = TRUE)  #pretty hard to see since so small
+plot(world_trans, col = NA, lwd = 0.8, add = TRUE)
+plot(unesco_filtered_vect, col = "slateblue4", alpha = 0.8, cex =1.1, add = TRUE)
 ```
+
+
+
+## Analysis
+
+Let's look at the size (in hectares) of the remaining cultural heritage sites
+
+```{r}
+# overall stats of remaining cultural sites
+mean_size_ha <- mean(unesco_filtered$area_hectares)
+median_size_ha <- median(unesco_filtered$area_hectares)
+sd_size_ha <- sd(unesco_filtered$area_hectares)
+n <- count(unesco_filtered)
+mean_size_ha
+median_size_ha
+sd_size_ha
+n
+
+
+# look by country 
+unesco_filtered_stats <- unesco_filtered %>% 
+  group_by(country) %>% 
+  summarise(mean_area_ha = mean(area_hectares),
+            sd_area_ha = sd(area_hectares),
+            median_size_ha = median(area_hectares),
+            n = n())
+
+```
+
+
+
+
 
 
