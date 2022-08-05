@@ -22,6 +22,8 @@ library(exactextractr)  # extracting what's underneath polys, points
 library(kableExtra)
 library(tidyverse)
 library(here)
+library(plotly)
+library(leaflet)
 ```
 
 
@@ -203,7 +205,34 @@ world <- ne_countries(scale = "medium", returnclass = "sf") %>%
 plot(wdpa)
 plot(urban, col = "navyblue", add = TRUE)  #pretty hard to see since so small
 plot(world, col = NA, lwd = 0.8, add = TRUE)
-plot(unesco_filtered_vect, col = "slateblue4", alpha = 0.8, cex =0.9, add = TRUE)
+points(unesco_filtered_vect, col = "slateblue4", alpha = 0.8, cex =0.9, add = TRUE)
+```
+
+Try plotting just points with ggplot
+```{r}
+plot <- ggplot() +
+          geom_sf(data = world, color = "gray", size = 0.3) +
+          geom_sf(data = unesco_filtered_geom,
+                  aes(size = area_hectares),
+                  color = "slateblue",
+                  alpha = 0.6)
+plot
+
+
+ggplotly(plot)
+```
+
+
+Try plotting with leaflet
+```{r}
+# need to convert from terra SpatRaster to regular RasterLayer
+# leaflet doesn't yet play nice with terra
+
+wdpa_rast <- raster(wdpa)
+urban_rast <- raster(urban)
+
+#leaflet() %>% 
+  #addRasterImage(wdpa_rast)
 ```
 
 
@@ -233,10 +262,22 @@ unesco_filtered_stats <- unesco_filtered %>%
             sd_area_ha = round(sd(area_hectares), 2),
             median_size_ha = round(median(area_hectares), 2),
             n = n()) %>% 
-  relocate(n, .before = mean_area_ha)
+  relocate(n, .before = mean_area_ha) %>% 
+  arrange(., n)
 
 # return summary table
 kable(unesco_filtered_stats) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  scroll_box(height = "400px")
+
+
+# look at countries with more than 3
+unesco_filtered_stats_3 <- unesco_filtered_stats %>% 
+  filter(n >= 3) %>% 
+  arrange(., n)
+
+# return summary table of more than 3 sites
+kable(unesco_filtered_stats_3) %>% 
   kable_styling(bootstrap_options = "striped") %>% 
   scroll_box(height = "400px")
 ```
